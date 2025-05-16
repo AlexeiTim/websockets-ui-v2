@@ -28,7 +28,6 @@ const SEND_EVENTS = {
   create_game: createGame,
   update_room: updateRoom,
   start_game: startGame,
-  attack: sendAttack,
   turn: turn,
   finish: finish,
 };
@@ -213,8 +212,11 @@ function addShips(data, ws) {
     indexPlayer,
     ships,
     shipsWithCells: ships.map((ship) => {
+      const direction = ship.direction ? "vertical" : "horizontal";
       const newShip = {
         state: "live",
+        direction,
+        type: ship.type,
         cells: [],
       };
       if (ship.type === "small") {
@@ -228,6 +230,7 @@ function addShips(data, ws) {
       newShip.cells.push(...generateShipCells(ship));
       return newShip;
     }),
+    shotsHistory: [],
   };
   if (game.info && game.info.length) {
     game.info.push(playerInfo);
@@ -272,6 +275,75 @@ function addWinForUser(userId) {
   usersMap.set(userId, user);
 }
 
+function randomAttack(data, ws) {
+  const { gameId, indexPlayer } = JSON.parse(data);
+  const game = gamesMap.get(gameId);
+  const enemyInfo = game.info.find((i) => i.indexPlayer !== indexPlayer);
+  const shotsHistory = enemyInfo.shotsHistory;
+  let attackCoords = null;
+  while (!attackCoords) {
+    const randomX = Math.floor(Math.random() * 9);
+    const randomY = Math.floor(Math.random() * 9);
+    const hasCoords = shotsHistory.find(
+      (shot) => shot.x === randomX && shot.y === randomY
+    );
+    if (!hasCoords) {
+      attackCoords = {
+        x: randomX,
+        y: randomY,
+      };
+      break;
+    }
+  }
+  attack(
+    JSON.stringify({
+      gameId,
+      x: attackCoords.x,
+      y: attackCoords.y,
+      indexPlayer,
+    })
+  );
+}
+
+function getCoordsAroundShip(ship) {
+  const cells = ship.cells;
+  const coords = [];
+  // x = 1
+  // y = 1
+  /**
+   * [[0, 0][1, 0][2, 0]]
+   * [[0, 1][1, 1][2, 1]]
+   * [[0, 2][1, 2][2, 2]]
+   */
+  const queueCalc = [
+    { x: -1, y: -1 },
+    { x: 0, y: -1 },
+    { x: 1, y: -1 },
+    { x: -1, y: 0 },
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: -1, y: 1 },
+    { x: 0, y: 1 },
+    { x: 1, y: 1 },
+  ];
+  cells.forEach((cell) => {
+    queueCalc.forEach((calc) => {
+      const newCoord = {
+        x: cell.x + calc.x,
+        y: cell.y + calc.y,
+        state: "kill",
+      };
+      if (
+        cells.some((cell) => cell.x === newCoord.x && cell.y === newCoord.y)
+      ) {
+        newCoord.state = "shot";
+      }
+      coords.push(newCoord);
+    });
+  });
+  return coords.filter((coord) => coord.x >= 0 && coord.y >= 0);
+}
+
 function attack(data, ws) {
   const body = JSON.parse(data);
   const { gameId, x, y, indexPlayer } = body;
@@ -287,6 +359,20 @@ function attack(data, ws) {
   }
 
   const enemyInfo = game.info.find((i) => i.indexPlayer !== indexPlayer);
+  const hasAttackCoords = enemyInfo.shotsHistory.find(
+    (item) => item.x === x && item.y === y
+  );
+  console.log("shots history", enemyInfo.shotsHistory);
+  if (hasAttackCoords) {
+    ws.send(
+      JSON.stringify({
+        message: "Already shoted",
+      })
+    );
+    return;
+  }
+  enemyInfo.shotsHistory.push({ x, y });
+  console.log(enemyInfo);
   const findedShipWithCells = enemyInfo.shipsWithCells.find((shipWithCells) =>
     shipWithCells.cells.some((cell) => cell.x === x && cell.y === y)
   );
@@ -322,6 +408,7 @@ function attack(data, ws) {
         })
       );
     });
+    gamesMap.set(gameId, game);
   } else {
     findedShipWithCells.cells = findedShipWithCells.cells.map((cell) => {
       if (cell.x === x && cell.y === y && cell.state === "live") {
@@ -356,20 +443,40 @@ function attack(data, ws) {
     );
     game.info.forEach((info) => {
       const socket = socketsMap.get(info.indexPlayer);
-      socket.send(
-        JSON.stringify({
-          type: "attack",
-          data: JSON.stringify({
-            position: {
-              x,
-              y,
-            },
-            currentPlayer: indexPlayer,
-            status: requestStatus,
-          }),
-          id: 0,
-        })
-      );
+      const coordsAroundKilledShip = getCoordsAroundShip(findedShipWithCells);
+      if (isKilled) {
+        coordsAroundKilledShip.forEach((coord) => {
+          socket.send(
+            JSON.stringify({
+              type: "attack",
+              data: JSON.stringify({
+                position: {
+                  x: coord.x,
+                  y: coord.y,
+                },
+                currentPlayer: indexPlayer,
+                status: coord.state,
+              }),
+              id: 0,
+            })
+          );
+        });
+      } else {
+        socket.send(
+          JSON.stringify({
+            type: "attack",
+            data: JSON.stringify({
+              position: {
+                x,
+                y,
+              },
+              currentPlayer: indexPlayer,
+              status: requestStatus,
+            }),
+            id: 0,
+          })
+        );
+      }
       socket.send(
         JSON.stringify({
           type: "turn",
@@ -389,19 +496,13 @@ function attack(data, ws) {
             id: 0,
           })
         );
-        addWinForUser(indexPlayer);
-        updateWinners();
       }
     });
+    if (isGameFinished) {
+      addWinForUser(indexPlayer);
+      updateWinners();
+    }
   }
-}
-
-function sendAttack(request, gameId) {
-  const game = gamesMap.get(gameId);
-}
-
-function randomAttack(data, ws) {
-  console.log(data);
 }
 
 function turn() {}
