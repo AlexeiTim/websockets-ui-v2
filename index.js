@@ -82,11 +82,18 @@ function sendReg(data, ws) {
   );
 }
 
-function reg(data, ws) {
+function reg(body, ws) {
+  const data = JSON.parse(body);
+  const user = usersMap.values().find((user) => user.name === data.name);
+  if (user) {
+    sendError("User exists", ws);
+    return;
+  }
   const id = Date.now();
+
   usersMap.set(id, {
     id,
-    ...JSON.parse(data),
+    ...data,
     wins: 0,
   });
   const requestData = {
@@ -207,6 +214,8 @@ function createGame(roomId, ws) {
       })
     );
   });
+  roomsMap.delete(roomId);
+  SEND_EVENTS.update_room();
 }
 
 function sendAllMessage(data) {
@@ -219,7 +228,6 @@ function updateRoom(ws) {
   const roomsArr = Array.from(roomsMap);
   const allRooms = roomsArr.map((room) => room[1]);
   const rooms = allRooms.filter((room) => room.roomUsers.length !== 2);
-
   sendAllMessage(
     JSON.stringify({
       type: "update_room",
@@ -598,7 +606,6 @@ function turn() {}
 function finish() {}
 
 wss.on("connection", (ws, _, client) => {
-  console.log("connection");
   ws.on("error", console.error);
 
   ws.on("message", function message(data) {
