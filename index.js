@@ -1,5 +1,6 @@
 import { WebSocketServer } from "ws";
 import { httpServer } from "./src/http_server/index.js";
+import { getBotShipsVariant } from "./botShips.js";
 const wss = new WebSocketServer({
   port: 3000,
 });
@@ -39,7 +40,37 @@ const INCOMING_EVENTS = {
   add_ships: addShips,
   attack: attack,
   randomAttack: randomAttack,
+  single_play: singlePlay,
 };
+
+function singlePlay(data, ws) {
+  const currentUser = usersMap.get(ws.playerId);
+  const createdRoom = generateRoom({
+    name: "BOT",
+    id: "BOT",
+  });
+  addUserRoRoom(
+    JSON.stringify({
+      indexRoom: createdRoom.roomId,
+    }),
+    ws
+  );
+  roomsMap.delete(createdRoom.roomId);
+  const actualGame = Array.from(gamesMap).filter(([gameId, gameInfo]) => {
+    return gameInfo.roomUsers.some(
+      (roomUser) =>
+        roomUser.index === "BOT" || roomUser.index === currentUser.index
+    );
+  })[0];
+  const ganeratedShips = getBotShipsVariant();
+  addShips(
+    JSON.stringify({
+      gameId: actualGame[0],
+      ships: ganeratedShips,
+      indexPlayer: "BOT",
+    })
+  );
+}
 
 function sendReg(data, ws) {
   ws.send(
@@ -83,8 +114,7 @@ function updateWinners() {
   );
 }
 
-function createRoom(data, ws) {
-  const user = usersMap.get(ws.playerId);
+function generateRoom(user, ws) {
   const roomId = String(Date.now());
 
   const createRoomData = {
@@ -99,6 +129,18 @@ function createRoom(data, ws) {
   };
   roomsMap.set(roomId, createRoomData);
   SEND_EVENTS.update_room(ws);
+  return createRoomData;
+}
+function createRoom(data, ws) {
+  const user = usersMap.get(ws.playerId);
+  const createRoomData = generateRoom(user, ws);
+  addUserRoRoom(
+    JSON.stringify({
+      indexRoom: createRoomData.id,
+    }),
+    ws
+  );
+  return createRoomData;
 }
 
 function sendError(message, ws) {
@@ -153,6 +195,8 @@ function createGame(roomId, ws) {
   });
   room.roomUsers.forEach((user) => {
     const socket = findSocketByUserId(user.index);
+    if (!socket) return;
+
     socket.send(
       JSON.stringify({
         type: "create_game",
@@ -173,7 +217,9 @@ function sendAllMessage(data) {
 
 function updateRoom(ws) {
   const roomsArr = Array.from(roomsMap);
-  const rooms = roomsArr.map((room) => room[1]);
+  const allRooms = roomsArr.map((room) => room[1]);
+  const rooms = allRooms.filter((room) => room.roomUsers.length !== 2);
+
   sendAllMessage(
     JSON.stringify({
       type: "update_room",
@@ -246,6 +292,7 @@ function startGame(gameId, ws) {
   game.turn = initTurnPlayer;
   game.info.forEach((info) => {
     const socket = socketsMap.get(info.indexPlayer);
+    if (!socket) return;
     socket.send(
       JSON.stringify({
         type: "start_game",
@@ -265,6 +312,14 @@ function startGame(gameId, ws) {
         id: 0,
       })
     );
+    if (game.info.some((i) => i.indexPlayer === "BOT") && game.turn === "BOT") {
+      randomAttack(
+        JSON.stringify({
+          gameId,
+          indexPlayer: "BOT",
+        })
+      );
+    }
   });
   gamesMap.set(gameId, game);
 }
@@ -275,11 +330,7 @@ function addWinForUser(userId) {
   usersMap.set(userId, user);
 }
 
-function randomAttack(data, ws) {
-  const { gameId, indexPlayer } = JSON.parse(data);
-  const game = gamesMap.get(gameId);
-  const enemyInfo = game.info.find((i) => i.indexPlayer !== indexPlayer);
-  const shotsHistory = enemyInfo.shotsHistory;
+function getRandomCoordsByHistory(shotsHistory) {
   let attackCoords = null;
   while (!attackCoords) {
     const randomX = Math.floor(Math.random() * 9);
@@ -295,11 +346,25 @@ function randomAttack(data, ws) {
       break;
     }
   }
+  return {
+    x: attackCoords.x,
+    y: attackCoords.y,
+  };
+}
+
+function randomAttack(data, ws) {
+  const { gameId, indexPlayer } = JSON.parse(data);
+
+  const game = gamesMap.get(gameId);
+  const enemyInfo = game.info.find((i) => i.indexPlayer !== indexPlayer);
+  const shotsHistory = enemyInfo.shotsHistory;
+  let { x, y } = getRandomCoordsByHistory(shotsHistory);
+
   attack(
     JSON.stringify({
       gameId,
-      x: attackCoords.x,
-      y: attackCoords.y,
+      x,
+      y,
       indexPlayer,
     })
   );
@@ -362,7 +427,6 @@ function attack(data, ws) {
   const hasAttackCoords = enemyInfo.shotsHistory.find(
     (item) => item.x === x && item.y === y
   );
-  console.log("shots history", enemyInfo.shotsHistory);
   if (hasAttackCoords) {
     ws.send(
       JSON.stringify({
@@ -372,7 +436,6 @@ function attack(data, ws) {
     return;
   }
   enemyInfo.shotsHistory.push({ x, y });
-  console.log(enemyInfo);
   const findedShipWithCells = enemyInfo.shipsWithCells.find((shipWithCells) =>
     shipWithCells.cells.some((cell) => cell.x === x && cell.y === y)
   );
@@ -384,6 +447,7 @@ function attack(data, ws) {
 
     game.info.forEach((info) => {
       const socket = socketsMap.get(info.indexPlayer);
+      if (!socket) return;
       socket.send(
         JSON.stringify({
           type: "attack",
@@ -409,6 +473,14 @@ function attack(data, ws) {
       );
     });
     gamesMap.set(gameId, game);
+    if (game.turn === "BOT") {
+      randomAttack(
+        JSON.stringify({
+          gameId,
+          indexPlayer: "BOT",
+        })
+      );
+    }
   } else {
     findedShipWithCells.cells = findedShipWithCells.cells.map((cell) => {
       if (cell.x === x && cell.y === y && cell.state === "live") {
@@ -443,7 +515,11 @@ function attack(data, ws) {
     );
     game.info.forEach((info) => {
       const socket = socketsMap.get(info.indexPlayer);
+      if (!socket) return;
+
       const coordsAroundKilledShip = getCoordsAroundShip(findedShipWithCells);
+      console.log("coordsAroundKilledShip", coordsAroundKilledShip);
+      console.log("findedShipWithCells", findedShipWithCells);
       if (isKilled) {
         coordsAroundKilledShip.forEach((coord) => {
           socket.send(
@@ -499,8 +575,20 @@ function attack(data, ws) {
       }
     });
     if (isGameFinished) {
-      addWinForUser(indexPlayer);
-      updateWinners();
+      const isGameWithBot = game.info.some((i) => i.indexPlayer === "BOT");
+      if (!isGameWithBot) {
+        addWinForUser(indexPlayer);
+        updateWinners();
+      }
+      gamesMap.delete(gameId);
+    }
+    if (game.turn === "BOT") {
+      randomAttack(
+        JSON.stringify({
+          gameId,
+          indexPlayer: "BOT",
+        })
+      );
     }
   }
 }
