@@ -16,7 +16,7 @@ export interface Ship {
 }
 
 export interface ShipWithCells extends Omit<Ship, "position"> {
-  state: "live" | "killed";
+  state: "live" | "kill";
   cells: Cell[];
 }
 
@@ -96,7 +96,7 @@ export interface TurnData {
 export interface AttackData {
   position: Position;
   currentPlayer: number | "BOT";
-  status: "miss" | "shot" | "killed" | "kill";
+  status: "miss" | "shot" | "kill" | "kill";
 }
 
 export interface FinishData {

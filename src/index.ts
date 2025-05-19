@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws";
-import { httpServer } from "./http_server";
-import { getBotShipsVariant } from "./botShips";
+import { httpServer } from "./http_server/index.js";
+import { getBotShipsVariant } from "./botShips.js";
 
 import {
   User,
@@ -62,9 +62,8 @@ const INCOMING_EVENTS = {
   attack,
   randomAttack,
   single_play: singlePlay,
+  add_ships: addShips,
 };
-
-const botId = Date.now();
 
 function generateShipCells(ship: Ship): Array<Position & { state: "live" }> {
   const direction = ship.direction ? "vertical" : "horizontal";
@@ -149,7 +148,7 @@ function reg(data: string, ws: WebSocketWithPlayerId): void {
   };
 
   SEND_EVENTS.reg(requestData, ws);
-  SEND_EVENTS.update_room(ws);
+  SEND_EVENTS.update_room();
   SEND_EVENTS.update_winners();
   ws.playerId = id;
   socketsMap.set(id, ws);
@@ -183,7 +182,7 @@ function generateRoom(
     ],
   };
   roomsMap.set(roomId, createRoomData);
-  SEND_EVENTS.update_room(ws);
+  SEND_EVENTS.update_room();
   return createRoomData;
 }
 
@@ -234,8 +233,8 @@ function addUserRoRoom(data: string, ws: WebSocketWithPlayerId): void {
   });
   room.available = false;
   roomsMap.set(addedRoomId, room);
-  SEND_EVENTS.update_room(ws);
   SEND_EVENTS.create_game(addedRoomId, ws);
+  SEND_EVENTS.update_room();
 }
 
 function findSocketByUserId(
@@ -275,6 +274,7 @@ function createGame(roomId: string, ws: WebSocketWithPlayerId): void {
       })
     );
   });
+  roomsMap.delete(roomId);
 }
 
 function sendAllMessage(data: string): void {
@@ -283,9 +283,32 @@ function sendAllMessage(data: string): void {
   });
 }
 
-function updateRoom(ws: WebSocketWithPlayerId): void {
+function updateRoom(): void {
   const roomsArr = Array.from(roomsMap);
-  const rooms = roomsArr.map((room) => room[1]);
+  const games = Array.from(gamesMap);
+  console.log("rooms", roomsArr);
+  console.log("games", games);
+  const rooms = roomsArr
+    .map((room) => room[1])
+    .filter((room) => {
+      const allUsersInGame = room.roomUsers.length === 2;
+      if (allUsersInGame) {
+        return false;
+      }
+      console.log(games);
+      const gameWithSomePlayer = games.find(([gameId, gameInfo]) => {
+        const gameUsersIndexes = gameInfo.roomUsers.map((user) => user.index);
+        const hasUserIndexInRoom = room.roomUsers.some((user) =>
+          gameUsersIndexes.some((gameUserIdx) => gameUserIdx === user.index)
+        );
+        if (hasUserIndexInRoom) return true;
+      });
+      console.log("gameWithSomePlayer", gameWithSomePlayer);
+      if (gameWithSomePlayer) return false;
+
+      return true;
+    });
+
   sendAllMessage(
     JSON.stringify({
       type: "update_room",
@@ -326,6 +349,7 @@ function addShips(data: string): void {
     }),
     shotsHistory: [],
   };
+  console.log("player info", playerInfo);
   if (game.info && game.info.length) {
     game.info.push(playerInfo);
     SEND_EVENTS.start_game(gameId);
@@ -564,12 +588,18 @@ function attack(data: string): void {
     const isKilled = findedShipWithCells.cells.every(
       (cell) => cell.state === "shot"
     );
-    let requestStatus: "shot" | "killed" = "shot";
+    let requestStatus: "shot" | "kill" = "shot";
     if (isKilled) {
-      requestStatus = "killed";
-      findedShipWithCells.state = "killed";
+      requestStatus = "kill";
+      findedShipWithCells.state = "kill";
     }
-    enemyInfo.shipsWithCells = [findedShipWithCells];
+    console.log("START");
+    console.log("findedShipWithCells", findedShipWithCells);
+    console.log("enemyInfo shipithCells", enemyInfo.shipsWithCells);
+    console.log("END");
+    enemyInfo.shipsWithCells = enemyInfo.shipsWithCells.map((ship) =>
+      ship === findedShipWithCells ? findedShipWithCells : ship
+    );
     game.info = game.info.map((i) => {
       if (i.indexPlayer === indexPlayer) {
         return i;
@@ -578,9 +608,9 @@ function attack(data: string): void {
       }
     });
     gamesMap.set(gameId, game);
-
+    console.log("enemyInfo.shipsWithCells", enemyInfo.shipsWithCells);
     const isGameFinished = enemyInfo.shipsWithCells.every(
-      (ship) => ship.state === "killed"
+      (ship) => ship.state === "kill"
     );
     game.info.forEach((info) => {
       const socket = socketsMap.get(info.indexPlayer);
@@ -678,6 +708,35 @@ wss.on("connection", (ws: WebSocketWithPlayerId) => {
     if (handler) {
       if (typeof body.data !== "string") return;
       handler(body.data, ws);
+    }
+  });
+
+  ws.on("close", () => {
+    console.log("ws disconnect");
+    if (ws.playerId) {
+      console.log("reg user disconnected with id: " + ws.playerId);
+      usersMap.delete(ws.playerId);
+      socketsMap.delete(ws.playerId);
+      const rooms = Array.from(roomsMap);
+      rooms.forEach(([roomId, roomData]) => {
+        const hasDisconnectedUser = roomData.roomUsers.find(
+          (room) => room.index === ws.playerId
+        );
+        if (hasDisconnectedUser) {
+          roomsMap.delete(roomId);
+        }
+      });
+      const games = Array.from(gamesMap);
+      games.forEach(([gameId, gameInfo]) => {
+        const hasUserInGame = gameInfo.roomUsers.find(
+          (user) => user.index === ws.playerId
+        );
+        if (hasUserInGame) {
+          gamesMap.delete(gameId);
+        }
+      });
+      updateRoom();
+      updateWinners();
     }
   });
 });
