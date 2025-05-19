@@ -135,6 +135,13 @@ function sendReg(data: RegData, ws: WebSocketWithPlayerId): void {
 function reg(data: string, ws: WebSocketWithPlayerId): void {
   const id = Date.now();
   const parsedData = JSON.parse(data);
+  const hasUser = Array.from(usersMap).find(
+    ([_, user]) => user.name === parsedData.name
+  );
+  if (hasUser) {
+    sendError("User exists", ws);
+    return;
+  }
   usersMap.set(id, {
     id,
     ...parsedData,
@@ -678,9 +685,10 @@ function attack(data: string): void {
       const isGameWithBot = game.info.some((i) => i.indexPlayer === "BOT");
       if (!isGameWithBot && typeof indexPlayer === "number") {
         addWinForUser(indexPlayer);
-        updateWinners();
       }
       gamesMap.delete(gameId);
+      updateWinners();
+      updateRoom();
     }
     if (game.turn === "BOT") {
       randomAttack(
@@ -697,7 +705,36 @@ function turn(): void {}
 
 function finish(): void {}
 
-wss.on("connection", (ws: WebSocketWithPlayerId) => {
+const disconnect = (ws: WebSocketWithPlayerId) => {
+  console.log("ws disconnect");
+  if (ws.playerId) {
+    console.log("reg user disconnected with id: " + ws.playerId);
+    usersMap.delete(ws.playerId);
+    socketsMap.delete(ws.playerId);
+    const rooms = Array.from(roomsMap);
+    rooms.forEach(([roomId, roomData]) => {
+      const hasDisconnectedUser = roomData.roomUsers.find(
+        (room) => room.index === ws.playerId
+      );
+      if (hasDisconnectedUser) {
+        roomsMap.delete(roomId);
+      }
+    });
+    const games = Array.from(gamesMap);
+    games.forEach(([gameId, gameInfo]) => {
+      const hasUserInGame = gameInfo.roomUsers.find(
+        (user) => user.index === ws.playerId
+      );
+      if (hasUserInGame) {
+        gamesMap.delete(gameId);
+      }
+    });
+    updateRoom();
+    updateWinners();
+  }
+};
+
+const connection = (ws: WebSocketWithPlayerId) => {
   console.log("connection");
   ws.on("error", console.error);
 
@@ -711,32 +748,7 @@ wss.on("connection", (ws: WebSocketWithPlayerId) => {
     }
   });
 
-  ws.on("close", () => {
-    console.log("ws disconnect");
-    if (ws.playerId) {
-      console.log("reg user disconnected with id: " + ws.playerId);
-      usersMap.delete(ws.playerId);
-      socketsMap.delete(ws.playerId);
-      const rooms = Array.from(roomsMap);
-      rooms.forEach(([roomId, roomData]) => {
-        const hasDisconnectedUser = roomData.roomUsers.find(
-          (room) => room.index === ws.playerId
-        );
-        if (hasDisconnectedUser) {
-          roomsMap.delete(roomId);
-        }
-      });
-      const games = Array.from(gamesMap);
-      games.forEach(([gameId, gameInfo]) => {
-        const hasUserInGame = gameInfo.roomUsers.find(
-          (user) => user.index === ws.playerId
-        );
-        if (hasUserInGame) {
-          gamesMap.delete(gameId);
-        }
-      });
-      updateRoom();
-      updateWinners();
-    }
-  });
-});
+  ws.on("close", disconnect);
+};
+
+wss.on("connection", connection);
