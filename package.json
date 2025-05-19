@@ -1,21 +1,23 @@
 {
-    "name": "ws_task",
-    "version": "1.0.0",
-    "description": "Template for the WebSocket remote control task",
-    "main": "index.js",
-    "type": "module",
-    "scripts": {
-        "start": "node ./index.js",
-        "start:dev": "nodemon ./index.js",
-        "test": "echo \"Error: no test specified\" && exit 1"
-    },
-    "author": "Andrei Auchynnikau",
-    "keywords": [],
-    "license": "ISC",
-    "devDependencies": {
-        "nodemon": "^2.0.16"
-    },
-    "dependencies": {
-        "ws": "^8.8.0"
-    }
+  "name": "websockets-ui-v2",
+  "version": "1.0.0",
+  "description": "Template for the WebSocket remote control task",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsc -w & node --watch dist/index.js",
+    "build": "tsc"
+  },
+  "author": "Andrei Auchynnikau",
+  "keywords": [],
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
 }
