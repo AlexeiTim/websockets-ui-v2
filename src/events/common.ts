@@ -34,7 +34,6 @@ export const disconnect = (ws: WebSocketWithPlayerId) => {
 };
 
 export const connection = (ws: WebSocketWithPlayerId) => {
-  console.log("connection", ws);
   ws.on("error", console.error);
 
   ws.on("message", (data: string) => {
