@@ -1,5 +1,12 @@
 import { WebSocket } from "ws";
 
+export interface DataBase {
+  usersMap: Map<number, User>;
+  roomsMap: Map<string, Room>;
+  socketsMap: Map<string | number, WebSocketWithPlayerId>;
+  gamesMap: Map<number, Game>;
+}
+
 export type ShipCellState = "kill" | "shot" | "live";
 
 export interface Position {

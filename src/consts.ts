@@ -1,4 +1,4 @@
-import { Ship } from "./types";
+import { Ship } from "./types.js";
 
 export const botShipsVariants: Ship[][] = [
   [
@@ -62,9 +62,3 @@ export const botShipsVariants: Ship[][] = [
     { position: { x: 3, y: 7 }, direction: true, type: "small", length: 1 },
   ],
 ];
-
-export function getBotShipsVariant(): Ship[] {
-  const maxVariants = botShipsVariants.length;
-  const randomVariant = Math.floor(Math.random() * maxVariants);
-  return botShipsVariants[randomVariant];
-}
